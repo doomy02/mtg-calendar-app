@@ -1,0 +1,36 @@
+:root{font-family:Inter,system-ui,sans-serif;color:#e9ebf5;background:#111421;color-scheme:dark;line-height:1.5}
+*{box-sizing:border-box}
+body{margin:0}
+header{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem max(1rem,calc((100vw - 1180px)/2));background:#1c2135;border-bottom:1px solid #343b55}
+header>a{font-weight:800;color:#fff;text-decoration:none}
+nav{display:flex;gap:1rem}
+main{max-width:1180px;margin:auto;padding:1.4rem 1rem}
+h1{font-size:clamp(1.8rem,4vw,2.8rem);letter-spacing:-.04em;margin:.2rem 0 1rem}
+h2{font-size:1.2rem;margin:0 0 .7rem}
+p{margin:.45rem 0 1rem}
+a{color:#c5bbff}
+.layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:1rem}
+section,article{background:#1b2032;border:1px solid #343b55;border-radius:12px;padding:1rem;margin-bottom:1rem}
+article{background:#232a41}
+form{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end;margin:.55rem 0}
+aside form{display:grid;align-items:stretch}
+label{display:grid;gap:.2rem;font-size:.88rem;color:#cbd1e6;min-width:0}
+input,select,button{font:inherit;padding:.48rem .65rem;border-radius:7px;border:1px solid #505a78;background:#151a2b;color:#fff;max-width:100%;min-width:0}
+button{background:#b6a5ff;color:#201738;border-color:transparent;font-weight:650;cursor:pointer}
+button:hover{background:#d1c6ff}
+.scroll{overflow:auto;max-height:420px}
+table{border-collapse:separate;border-spacing:3px;width:100%;font-size:.85rem}
+th,td{white-space:nowrap;text-align:left;padding:.4rem .55rem;border-radius:5px;background:#272e46}
+thead th{position:sticky;top:0}
+.available{background:#185748}.maybe{background:#634b1c}.busy,.unavailable{background:#672f44}
+.muted{color:#a9b2cb}
+code{overflow-wrap:anywhere}
+@media(max-width:760px){.layout{grid-template-columns:1fr}}
+
+.place-layout section form[action="/place"] {display:grid; align-items:stretch}
+.place-location {padding:.85rem;background:#232a41;border-radius:8px}
+.place-location button {width:100%;min-height:44px}
+.place-location p {margin:.55rem 0 0;color:#cbd1e6}
+#place-coordinates summary {cursor:pointer;color:#c5bbff}
+#place-coordinates label {margin-top:.5rem}
+@media(max-width:760px){.place-layout input,.place-layout button,#watch{min-height:44px;font-size:16px}}
