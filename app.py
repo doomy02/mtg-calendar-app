@@ -1,4 +1,3 @@
-"""Self-hosted Commander calendar. Python 3.11+."""
 import base64
 import hashlib
 import json
@@ -37,6 +36,8 @@ CREATE TABLE IF NOT EXISTS members(group_id INTEGER, user_id INTEGER, PRIMARY KE
 CREATE TABLE IF NOT EXISTS invites(code TEXT PRIMARY KEY, group_id INTEGER, expires INTEGER);
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, user_id INTEGER, group_id INTEGER,
  title TEXT, start INTEGER, end INTEGER, venue TEXT);
+CREATE TABLE IF NOT EXISTS personal_availability(user_id INTEGER,start INTEGER,
+ state TEXT, PRIMARY KEY(user_id,start));
 CREATE TABLE IF NOT EXISTS availability(group_id INTEGER,user_id INTEGER,start INTEGER,
  state TEXT, PRIMARY KEY(group_id,user_id,start));
 CREATE TABLE IF NOT EXISTS rsvps(event_id INTEGER,user_id INTEGER,state TEXT,PRIMARY KEY(event_id,user_id));
@@ -146,7 +147,7 @@ def event_list(rows, csrf, user, db):
     cards = []
     for event in rows:
         dates = f'{date_time(event["start"]):%a %d %b %H:%M} to {date_time(event["end"]):%a %d %b %H:%M}'
-        detail = f'<article><strong>{e(event["title"])}</strong><p>{e(dates)} · {e(event["venue"] or "Private")}</p>'
+        detail = f'<article id="game-{event["id"]}"><strong>{e(event["title"])}</strong><p>{e(dates)} · {e(event["venue"] or "Private")}</p>'
         hidden = f'<input type="hidden" name="id" value="{event["id"]}">'
         if event["group_id"] is not None:
             replies = db.execute("SELECT u.name,r.state FROM rsvps r JOIN users u ON u.id=r.user_id WHERE r.event_id=? ORDER BY u.name",
@@ -186,13 +187,76 @@ def home(db, user, csrf, query, username):
                 f'<p>{views} · <a href="/?view={mode}&date={day-timedelta(days=1)}">Previous</a>'
                 f' · <a href="/?view={mode}&date={end_day}">Next</a></p>'
                 + event_list(rows, csrf, user, db) + '</section>')
+    hours = [(f"{hour:02d}:00", f"{hour:02d}:00") for hour in range(24)]
+    clock = lambda name, label: f'<label>{label}' + options(name, hours) + '</label>'
+    date_field = field("day", "Date", "date", f'value="{today}"')
+    saved = db.execute("SELECT start,state FROM personal_availability WHERE user_id=? AND start>=? AND start<? ORDER BY start",
+                       (user,start,end)).fetchall()
+    ranges = []
+    for row in saved:
+        slot, state = row["start"], row["state"]
+        if ranges and ranges[-1][1:] == (slot, state) and date_time(ranges[-1][0]).date() == date_time(slot).date():
+            ranges[-1] = (ranges[-1][0], slot + 3600, state)
+        else:
+            ranges.append((slot, slot + 3600, state))
+    summary = "".join(
+        f'<li><strong>{date_time(first):%a %d %b}</strong> · {date_time(first):%H:%M}–{date_time(last):%H:%M} · {e(state)}</li>'
+        for first,last,state in ranges
+    )
+    week = day - timedelta(days=day.weekday())
+    week_start = timestamp(f"{week}T00:00")
+    week_end = timestamp(f"{week+timedelta(days=7)}T00:00")
+    marked = {row["start"]: row["state"] for row in db.execute(
+        "SELECT start,state FROM personal_availability WHERE user_id=? AND start>=? AND start<?",
+        (user,week_start,week_end))}
+    picker = ['<div class="profile-grid" aria-label="Availability time picker">']
+    for offset in range(7):
+        date = week + timedelta(days=offset)
+        picker.append(f'<div class="profile-day"><strong>{date:%a %d %b}</strong>')
+        for hour in range(24):
+            label = f"{hour:02d}:00"
+            try:
+                slot = timestamp(f"{date}T{label}")
+                state = marked.get(slot, "")
+            except ValueError:
+                continue
+            picker.append(f'<button type="button" class="pick-hour {state.lower()}" data-day="{date}" data-hour="{hour}" data-slot="{slot}" data-state="{e(state)}" aria-pressed="false" aria-label="{date:%a %d %b} {label} {e(state)}">{label}</button>')
+        picker.append('</div>')
+    picker.append('</div><p id="picker-status" role="status">Tap one hour, or tap the first and last hours of a block.</p>')
+    batch = (f'<input type="hidden" name="week" value="{week}"><input type="hidden" name="changes">'
+             + '<label>Status' + options("state", [(state,state) for state in ("Available","Maybe","Unavailable","Clear")])
+             + '</label><button type="button" id="add-block">Add block</button>'
+             '<button type="button" id="discard-blocks">Discard draft</button>')
+    availability = ('<section id="my-availability"><h2>My availability</h2>'
+                    f'<p>{week:%d %b} – {week+timedelta(days=6):%d %b}. Add as many blocks as you like, then save the week.</p>'
+                    + ''.join(picker) + '<script src="/availability.js" defer></script>'
+                    + form("save-availability-week", csrf, batch, "Save week")
+                    + '<details><summary>Enter a single block manually</summary>'
+                    + form("profile-availability", csrf, date_field + clock("from","From") + clock("until","Until")
+                           + '<label>Status' + options("state", [(state,state) for state in ("Available","Maybe","Unavailable","Clear")])
+                           + '</label>', "Save block") + '</details>'
+                    + ('<ul>' + summary + '</ul>' if summary else '<p>No availability saved in this view.</p>'))
+    if groups:
+        availability += ('<h3>Import into a group</h3><p>Copies saved hours in the selected dates and replaces your group status for those hours.</p>'
+                         + form("import-availability", csrf,
+                                '<label>Group' + options("group", [(g["id"],g["name"]) for g in groups]) + '</label>'
+                                + field("first","First date","date", f'value="{day}"')
+                                + field("last","Last date","date", f'value="{end_day-timedelta(days=1)}"'),
+                                "Import availability"))
+    availability += ('<details><summary>Clear this week</summary>'
+                     f'<p>Remove your personal availability from {week:%d %b} through {week+timedelta(days=6):%d %b}.</p>'
+                     + form("clear-availability-week", csrf, f'<input type="hidden" name="week" value="{week}">'
+                            '<label><input type="checkbox" name="confirm" value="yes" required> Confirm clear</label>', "Clear this week")
+                     + '</details><details><summary>Reset my calendar inputs</summary>'
+                     '<p>Deletes all your private events and your personal and group availability. Shared events and RSVPs are kept.</p>'
+                     + form("reset-calendar", csrf, '<label><input type="checkbox" name="confirm" value="yes" required> Confirm reset</label>',
+                            "Delete my calendar inputs") + '</details></section>')
     sidebar = ('<aside><section><h2>Groups</h2><ul>' + links + '</ul>' +
                form("create-group", csrf, field("name","Group name",extra='maxlength="80"'), "Create group") +
                form("join", csrf, field("code","Invite code"), "Join group") +
-               '</section><section><h2>New private event</h2>' +
-               form("personal-event", csrf, event_fields(), "Save event") + '</section>' +
+               '</section>' +
                google_controls(csrf, user) + form("logout", csrf, "", "Sign out") + '</aside>')
-    return page("Your calendar", f'<p class="muted">Times shown in {e(ZONE.key)}</p><div class="layout">{calendar}{sidebar}</div>', username)
+    return page("Your calendar", f'<p class="muted">Times shown in {e(ZONE.key)}</p><div class="layout"><div>{availability}{calendar}</div>{sidebar}</div>', username)
 
 
 def group_page(db, user, csrf, query, username):
@@ -218,7 +282,6 @@ def group_page(db, user, csrf, query, username):
                            WHERE m.group_id=? AND r.state='Going' AND e.start<? AND e.end>?""",
                         (gid,end,start,gid,end,start)).fetchall()
     slots = {}
-    visible = []
     for slot in range(start, end, 3600):
         states = {}
         for person in people:
@@ -226,8 +289,6 @@ def group_page(db, user, csrf, query, username):
             busy = any(b["user_id"] == uid and b["start"] < slot+3600 and b["end"] > slot for b in blocks)
             states[uid] = "Busy" if busy else marks.get((slot,uid),"No reply")
         slots[slot] = states
-        if any(state != "No reply" for state in states.values()):
-            visible.append(slot)
 
     matches = []
     for slot in slots:
@@ -244,42 +305,103 @@ def group_page(db, user, csrf, query, username):
         link = f'/group?id={gid}&date={day}&slot={slot}&hours={duration}&minimum={minimum}#new-game'
         suggestions.append(f'<li><a href="{e(link)}">{e(label)}</a> · {len(names)}/{len(people)} · {e(", ".join(names))}</li>')
 
-    headings = "".join(f'<th>{e(person["name"])}</th>' for person in people)
-    table_rows = []
-    for slot in visible:
-        cells = "".join(f'<td class="{e(state.lower().replace(" ","-"))}">{e(state)}</td>' for state in slots[slot].values())
-        count = sum(state == "Available" for state in slots[slot].values())
-        table_rows.append(f'<tr><th>{date_time(slot):%a %d %b %H:%M %Z}</th><td>{count}/{len(people)}</td>{cells}</tr>')
-    table = (f'<div class="scroll"><table><thead><tr><th>Time</th><th>Available</th>{headings}</tr></thead>'
-             f'<tbody>{"".join(table_rows)}</tbody></table></div>' if table_rows else "<p>No availability entered this week.</p>")
-    grid = (f'<section><h2>Availability grid</h2><p>{day:%d %b} – {day+timedelta(days=6):%d %b} · {e(ZONE.key)} · Unlisted hours have no replies.</p>'
-            f'<p><a href="/group?id={gid}&date={day-timedelta(days=7)}">Previous week</a> · '
-            f'<a href="/group?id={gid}&date={day+timedelta(days=7)}">Next week</a></p>{table}</section>')
+    days = [day + timedelta(days=index) for index in range(7)]
+    active = query.get("focus", (today if today in days else day).isoformat())
+    if active not in {date.isoformat() for date in days}:
+        active = day.isoformat()
+    base = f"/group?id={gid}&date={day}&hours={duration}&minimum={minimum}"
+    games = db.execute("SELECT * FROM events WHERE group_id=? AND start<? AND end>? ORDER BY start",
+                       (gid,end,start)).fetchall()
+    matching = dict(matches)
+    strip = "".join(
+        f'<a class="day-tab {"chosen" if date.isoformat() == active else ""}" href="{e(base)}&amp;focus={date}#week">{date:%a}<strong>{date:%d}</strong></a>'
+        for date in days
+    )
+    best = ""
+    if matches:
+        first, names = matches[0]
+        last = first + duration*3600
+        best = (f'<article class="best-time"><strong>Best match · {date_time(first):%a %d %b, %H:%M}–{date_time(last):%H:%M}</strong>'
+                f'<p>{len(names)}/{len(people)} available · {e(", ".join(names))}</p>'
+                f'<a href="{e(base)}&amp;focus={date_time(first):%Y-%m-%d}&amp;slot={first}#new-game">Schedule this time</a></article>')
+    columns = []
+    for date in days:
+        cells = []
+        covered_until = 0
+        for slot, states in slots.items():
+            local = date_time(slot)
+            if local.date() != date or slot < covered_until:
+                continue
+            names = matching.get(slot)
+            last_start = slot
+            if names:
+                following = slot + 3600
+                while (date_time(following).date() == date and matching.get(following) == names
+                       and slots.get(following) == states
+                       and not any(following <= game["start"] < following+3600 for game in games)):
+                    last_start = following
+                    following += 3600
+            covered_until = last_start + 3600
+            time_label = f"{local:%H:%M}"
+            if last_start != slot:
+                time_label += f"–{date_time(last_start):%H:%M} starts"
+            count = sum(state == "Available" for state in states.values())
+            tone = ("full" if len(names) == len(people) else "pod") if names else "quiet"
+            details = "".join(f'<li>{e(person["name"])} · {e(states[person["id"]])}</li>' for person in people)
+            action = ""
+            if names:
+                action = (f'<p>{e(", ".join(names))} available for {duration}h from each listed start</p>'
+                          f'<a href="{e(base)}&amp;focus={date}&amp;slot={slot}#new-game">Schedule game night</a>')
+            mark_link = f'<a href="{e(base)}&amp;focus={date}&amp;mark={slot}#availability-form">Set my availability</a>'
+            events = "".join(
+                f'<a class="game-chip" href="#game-{game["id"]}">{date_time(game["start"]):%H:%M} {e(game["title"])}</a>'
+                for game in games if (slot <= game["start"] < slot + 3600 or
+                (game["start"] < slot < game["end"] and (slot == start or local.hour == 0)))
+            )
+            cells.append(f'<div class="week-slot">{events}<details class="{tone}">'
+                         f'<summary><time>{time_label}</time><strong>{len(names) if names else count}/{len(people)}</strong></summary>'
+                         f'<div class="slot-details"><ul>{details}</ul>{action}{mark_link}</div></details></div>')
+        selected = "active-day" if date.isoformat() == active else ""
+        columns.append(f'<div class="week-day {selected}"><h3>{date:%a %d %b}</h3>{"".join(cells)}</div>')
+    controls = [(0, "Everyone available")] + [(n, f"{n}+ players") for n in range(1, len(people)+1)]
+    attendance = "".join(f'<option value="{n}" {"selected" if n == minimum else ""}>{label}</option>'
+                         for n,label in controls)
     search = (f'<form method="get" action="/group"><input type="hidden" name="id" value="{gid}">'
+              f'<input type="hidden" name="focus" value="{active}">'
               f'<label>Week starts<input type="date" name="date" value="{day}" required></label>'
-              f'<label>Hours<input name="hours" type="number" min="1" max="12" value="{duration}" required></label>'
-              f'<label>Minimum players<input name="minimum" type="number" min="0" max="{len(people)}" value="{minimum}"></label>'
-              '<button>Find times</button></form><p class="muted">Use 0 to require everyone.</p>')
+              f'<label>Session length (hours)<input name="hours" type="number" min="1" max="12" value="{duration}" required></label>'
+              f'<label>Highlight<select name="minimum">{attendance}</select></label><button>Apply</button></form>')
+    grid = (f'<section id="week"><div class="week-heading"><div><h2>Weekly availability</h2>'
+            f'<p class="muted">{day:%d %b} – {days[-1]:%d %b} · {e(ZONE.key)}</p></div><nav>'
+            f'<a href="/group?id={gid}&amp;date={day-timedelta(days=7)}&amp;hours={duration}&amp;minimum={minimum}">← Previous</a>'
+            f'<a href="/group?id={gid}&amp;date={day+timedelta(days=7)}&amp;hours={duration}&amp;minimum={minimum}">Next →</a></nav></div>'
+            f'{search}{best}<p class="week-key"><span class="full">Everyone fits</span> <span class="pod">Minimum fits</span> '
+            f'<span class="quiet">Hourly count</span></p><nav class="day-strip">{strip}</nav>'
+            f'<div class="week-grid">{"".join(columns)}</div></section>')
     match_list = '<ul>' + "".join(suggestions) + '</ul>' if suggestions else '<p>No slots meet these requirements.</p>'
     mark = (hidden + field("start","From","datetime-local", 'step="3600"') +
             field("end","Until","datetime-local", 'step="3600"') +
             options("state",[(s,s) for s in ("Available","Maybe","Unavailable","Clear")]))
+    mark_slot = int(query.get("mark", 0))
+    if mark_slot in slots:
+        for key, value in (("start", mark_slot), ("end", mark_slot + 3600)):
+            mark = mark.replace(f'name="{key}" type="datetime-local"',
+                                f'name="{key}" type="datetime-local" value="{date_time(value):%Y-%m-%dT%H:%M}"')
     invite = ""
     if group["owner"] == user:
         codes = db.execute("SELECT code FROM invites WHERE group_id=? AND expires>=?",(gid,now())).fetchall()
         invite = '<section><h2>Invites</h2>' + form("invite",csrf,hidden,"Generate single-use invite")
         invite += "".join(f'<p><code>{e(row["code"])}</code></p>' for row in codes) + '</section>'
-    games = db.execute("SELECT * FROM events WHERE group_id=? AND start<? AND end>? ORDER BY start",(gid,end,start)).fetchall()
     game_fields = event_fields(True)
     if "slot" in query:
         selected = int(query["slot"])
-        if selected in slots:
+        if selected in matching:
             for key, time in (("start",selected),("end",selected+duration*3600)):
                 game_fields = game_fields.replace(f'name="{key}" type="datetime-local"',
                     f'name="{key}" type="datetime-local" value="{date_time(time):%Y-%m-%dT%H:%M}"')
-    return page(group["name"], f'<div class="layout"><div>{grid}<section><h2>Find a time</h2>{search}{match_list}</section>'
+    return page(group["name"], f'{grid}<div class="layout"><div><section><h2>Suggested starts</h2>{match_list}</section>'
                 f'<section><h2>Game nights</h2>{event_list(games,csrf,user,db)}</section></div>'
-                '<aside><section><h2>Your availability</h2>' + form("availability",csrf,mark,"Save availability") +
+                '<aside><section id="availability-form"><h2>Your availability</h2>' + form("availability",csrf,mark,"Save availability") +
                 '</section><section id="new-game"><h2>Schedule game night</h2>' +
                 form("game",csrf,hidden+game_fields,"Confirm game night") + '</section>' + invite + '</aside></div>', username)
 
@@ -442,6 +564,72 @@ def mutate(db, route, user, token, fields):
     if route == "logout":
         db.execute("DELETE FROM sessions WHERE token=?",(token,))
         return "/", session(db)
+    if route == "profile-availability":
+        day = datetime.strptime(required(fields,"day"), "%Y-%m-%d").date()
+        first, last = (required(fields,key) for key in ("from","until"))
+        if any(not re.fullmatch(r"(?:[01][0-9]|2[0-3]):00", value) for value in (first,last)):
+            raise ValueError("Choose whole-hour times.")
+        end_day = day + timedelta(days=int(last <= first))
+        start, end = timestamp(f"{day}T{first}"), timestamp(f"{end_day}T{last}")
+        state = required(fields,"state")
+        if state == "Clear":
+            db.execute("DELETE FROM personal_availability WHERE user_id=? AND start>=? AND start<?",
+                       (user,start,end))
+        elif state in {"Available","Maybe","Unavailable"}:
+            db.executemany("INSERT OR REPLACE INTO personal_availability VALUES (?,?,?)",
+                           ((user,slot,state) for slot in range(start,end,3600)))
+        else:
+            raise ValueError("Choose a valid availability status.")
+        return f"/?date={day}#my-availability", None
+    if route == "import-availability":
+        gid = int(required(fields,"group"))
+        membership(db,gid,user)
+        first,last = (datetime.strptime(required(fields,key),"%Y-%m-%d").date() for key in ("first","last"))
+        if not 0 <= (last-first).days < 31:
+            raise ValueError("Choose a range of up to 31 days.")
+        start = timestamp(f"{first}T00:00")
+        end = timestamp(f"{last+timedelta(days=1)}T00:00")
+        imported = db.execute("""INSERT OR REPLACE INTO availability(group_id,user_id,start,state)
+                                 SELECT ?,user_id,start,state FROM personal_availability
+                                 WHERE user_id=? AND start>=? AND start<?""", (gid,user,start,end))
+        if not imported.rowcount:
+            raise ValueError("You have no saved availability in those dates.")
+        return group_url(gid)+f"&date={first}", None
+    if route == "save-availability-week":
+        week = datetime.strptime(required(fields,"week"), "%Y-%m-%d").date()
+        if week.weekday() != 0:
+            raise ValueError("Choose a valid week.")
+        start = timestamp(f"{week}T00:00")
+        end = timestamp(f"{week+timedelta(days=7)}T00:00")
+        changes = json.loads(fields.get("changes", "null"))
+        if not isinstance(changes, dict) or not 1 <= len(changes) <= 169:
+            raise ValueError("Add at least one block before saving the week.")
+        for key, state in changes.items():
+            slot = int(key)
+            if not start <= slot < end or (slot-start) % 3600 or state not in ("Available","Maybe","Unavailable","Clear"):
+                raise ValueError("Invalid availability entry.")
+            if state == "Clear":
+                db.execute("DELETE FROM personal_availability WHERE user_id=? AND start=?", (user,slot))
+            else:
+                db.execute("INSERT OR REPLACE INTO personal_availability VALUES (?,?,?)", (user,slot,state))
+        return f"/?date={week}#my-availability", None
+    if route == "clear-availability-week":
+        if fields.get("confirm") != "yes":
+            raise ValueError("Confirm the clear first.")
+        week = datetime.strptime(required(fields,"week"), "%Y-%m-%d").date()
+        if week.weekday() != 0:
+            raise ValueError("Choose the Monday of the week to clear.")
+        start = timestamp(f"{week}T00:00")
+        end = timestamp(f"{week+timedelta(days=7)}T00:00")
+        db.execute("DELETE FROM personal_availability WHERE user_id=? AND start>=? AND start<?", (user,start,end))
+        return f"/?date={week}#my-availability", None
+    if route == "reset-calendar":
+        if fields.get("confirm") != "yes":
+            raise ValueError("Confirm the reset first.")
+        db.execute("DELETE FROM personal_availability WHERE user_id=?", (user,))
+        db.execute("DELETE FROM availability WHERE user_id=?", (user,))
+        db.execute("DELETE FROM events WHERE user_id=? AND group_id IS NULL", (user,))
+        return "/#my-availability", None
     if route == "create-group":
         gid = db.execute("INSERT INTO groups(name,owner) VALUES (?,?)",(required(fields,"name",80),user)).lastrowid
         db.execute("INSERT INTO members VALUES (?,?)",(gid,user))
@@ -523,7 +711,7 @@ def application(environ, start_response):
         ("X-Content-Type-Options","nosniff"),
         ("Referrer-Policy","no-referrer"),
         ("Permissions-Policy","geolocation=(self)"),
-        ("Content-Security-Policy","default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com https://accounts.google.com"),
+        ("Content-Security-Policy","default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com https://accounts.google.com https://accounts.google.com"),
     ]
 
     def send(status, body="", kind="text/html; charset=utf-8"):
@@ -537,7 +725,7 @@ def application(environ, start_response):
 
     if method not in {"GET","POST"}:
         return send("405 Method Not Allowed")
-    if method == "GET" and route in {"style.css","places.js"}:
+    if method == "GET" and route in {"style.css","places.js","availability.js"}:
         kind = "text/css" if route.endswith("css") else "text/javascript"
         return send("200 OK",Path(__file__).with_name(route).read_text(),kind+"; charset=utf-8")
     try:

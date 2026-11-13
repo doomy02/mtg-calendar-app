@@ -34,3 +34,45 @@ code{overflow-wrap:anywhere}
 #place-coordinates summary {cursor:pointer;color:#c5bbff}
 #place-coordinates label {margin-top:.5rem}
 @media(max-width:760px){.place-layout input,.place-layout button,#watch{min-height:44px;font-size:16px}}
+
+.week-heading{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
+.week-key{display:flex;flex-wrap:wrap;gap:.45rem;font-size:.85rem}
+.week-key span{padding:.2rem .55rem;border-radius:5px}
+.full{background:#185748;color:#e6fff4}
+.pod{background:#274783;color:#eff5ff}
+.quiet{background:#272e46;color:#d2d8ec}
+.week-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.4rem;max-height:610px;overflow:auto;align-items:start}
+.week-day{min-width:0}
+.week-day h3{margin:0;padding:.55rem .35rem;background:#1b2032;position:sticky;top:0;z-index:1;font-size:.85rem}
+.week-slot{margin-bottom:.28rem}
+.week-slot details{border-radius:5px}
+.week-slot summary{cursor:pointer;display:flex;justify-content:space-between;gap:.3rem;padding:.45rem .4rem;font-size:.83rem}
+.week-slot summary:focus-visible,.day-tab:focus-visible{outline:2px solid #c5bbff;outline-offset:-2px}
+.slot-details{padding:.45rem;font-size:.81rem;overflow-wrap:anywhere}
+.slot-details ul{padding-left:1rem;margin:0 0 .4rem}
+.slot-details a{display:block;margin-top:.4rem}
+.game-chip{display:block;background:#49366a;padding:.3rem;border-radius:4px;font-size:.78rem;overflow-wrap:anywhere}
+.day-strip{display:none}
+@media(max-width:760px){
+  .day-strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.25rem;margin-bottom:.6rem}
+  .day-tab{text-align:center;padding:.4rem .1rem;border-radius:5px;background:#272e46;font-size:.8rem;text-decoration:none}
+  .day-tab strong{display:block}
+  .day-tab.chosen{background:#b6a5ff;color:#201738}
+  .week-grid{display:block;max-height:540px}
+  .week-day{display:none}
+  .week-day.active-day{display:block}
+  .week-slot summary{padding:.75rem;font-size:1rem}
+}
+
+.profile-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(76px,1fr);gap:.4rem;overflow:auto;max-height:285px;padding:.25rem}
+.profile-day{display:grid;gap:.2rem;min-width:0;text-align:center}
+.profile-day>strong{position:sticky;top:0;background:#1b2032;padding:.4rem .1rem;font-size:.8rem;z-index:1}
+.pick-hour{background:#272e46;color:#e9ebf5;font-size:.85rem;min-height:36px}
+.pick-hour.available{background:#185748}
+.pick-hour.maybe{background:#634b1c}
+.pick-hour.unavailable{background:#672f44}
+.pick-hour:hover,.pick-hour[aria-pressed="true"]{background:#b6a5ff;color:#201738}
+.best-time{border-color:#538575;background:#203b38}
+.best-time p{margin:.35rem 0}
+@media(max-width:760px){.pick-hour{min-height:44px}}
+.draft-hour{outline:1px dashed #e9ebf5;outline-offset:-3px}

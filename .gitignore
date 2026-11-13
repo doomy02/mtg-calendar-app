@@ -1,30 +1,15 @@
-cd ~/Documents/commander-calendar
-
-cat >> .gitignore <<'EOF'
-
-# Python
+.env
+.env.*
+!.env.example
 .venv/
 venv/
 __pycache__/
 *.py[cod]
-
-# Local configuration and OAuth credentials
-.env
-.env.*
-!.env.example
-client_secret*.json
-credentials.json
-
-# SQLite databases and sidecar files
-*.sqlite3
-*.sqlite3-*
-*.sqlite
-*.sqlite-*
+*.sqlite*
 *.db
 *.db-*
-
-# Local backups and download archives
+client_secret*.json
+credentials.json
 backups/
 *.before-*
-commander-calendar*.zip
-EOF
+*.zip

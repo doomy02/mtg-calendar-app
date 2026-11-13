@@ -1,0 +1,19 @@
+services:
+  calendar:
+    build: .
+    image: commander-calendar:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CALENDAR_HOST_PORT:-8001}:8001"
+    environment:
+      CALENDAR_TIMEZONE: "${CALENDAR_TIMEZONE:-Europe/Bucharest}"
+      CALENDAR_SECURE_COOKIE: "${CALENDAR_SECURE_COOKIE:-1}"
+      CALENDAR_SETUP_CODE: "${CALENDAR_SETUP_CODE:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
+    volumes:
+      - calendar_data:/data
+volumes:
+  calendar_data:
+    name: commander-calendar-data
